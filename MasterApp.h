@@ -1,8 +1,9 @@
 /*
  * MasterApp.h
  *
- *  Created on: Aug 8, 2021
+ *  Created on: Aug 6, 2021
  *      Author: rahul
+ *  Modified from inet/applications/udpapp/UdpBasicBurst.h
  */
 
 #ifndef __INET_MASTERAPP_H_
@@ -30,7 +31,7 @@
 namespace inet {
 
 /**
- * UDP application. See NED for more info.
+ * UDP application with GMLA control.
  */
 //Forward declaration
 class SlaveApp;
@@ -38,7 +39,6 @@ class SlaveApp;
 class MasterApp : public UdpBasicBurst
 {
   public:
-
     struct classifier{ //Defining structure of a classifier
         int condition;
         int action;
@@ -63,37 +63,32 @@ class MasterApp : public UdpBasicBurst
     int n;
     double SendProb;
     int numHosts;
-    static int seed;
+    static int seed; // Random seed
     int numConsults;
     int numBest;
     int numE;
     int numExp;
     int back_to_L;
     cPar *numHostsPar = nullptr;
-    SlaveApp *listener[65];
+    SlaveApp *listener[125]; //!!! Change number here to match number of slave nodes !!!
     struct children{
         int c1,c2;
     };
     children from_evolve;
 
   protected:
+    //Overridden functions:
     virtual int numInitStages() const override { return NUM_INIT_STAGES; }
     virtual void initialize(int stage) override;
     virtual void processSend() override;
-    virtual void controlSP();
-    virtual void initialize_pop();
-    virtual int consult(double delta_ef);
-    virtual int random_choice(int a, int b, int &seed);
-    virtual double getSPVal(int action);
-    virtual children Evolve(int action1, int action2);
-    virtual int bernoulli_choice(double p, int &seed);
-    //virtual void crossover(int &seed);
-    //virtual void elitist();
-    //virtual void evaluate();
-    //virtual void best_SPs();
-    //virtual void mutate(int &seed);
-    //virtual void selector(int &seed);
-    //virtual void Xover(int one,int two,int &seed );
+    // Added functions (GMLA):
+    virtual void controlSP(); // Calculates SP using GA and sends periodically to slave nodes' apps
+    virtual void initialize_pop(); // Initialize classifier population
+    virtual int consult(double delta_ef); // Get current condition to determine classifier
+    virtual int random_choice(int a, int b, int &seed); // Random integer generator (within a range)
+    virtual double getSPVal(int action); // Get value of next round Sending Probability based on selected classifier
+    virtual children Evolve(int action1, int action2); // Mate selected parent classifiers (crossover, mutation)
+    virtual int bernoulli_choice(double p, int &seed); // Random Bernoulli number generator
 
     static simsignal_t spSignal;
     static simsignal_t efSignal;

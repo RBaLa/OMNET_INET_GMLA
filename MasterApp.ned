@@ -13,7 +13,7 @@
 // along with this program.  If not, see http://www.gnu.org/licenses/.
 // 
 
-package MasterApp;
+package Apps;
 
 import inet.applications.udpapp.UdpBasicBurst;
 import inet.applications.contract.IApp;
@@ -28,5 +28,5 @@ module MasterApp extends UdpBasicBurst like IApp
         @signal[QualityOfFusion](type=double);
         @statistic[Efficiency](source=Efficiency; record=max,vector);
         @statistic[SendProbability](source=SendingProbability;record=vector);
-        @statistic[QualityOfFusion](source=QualityOfFusion; record=max,vector);
+        @statistic[QualityOfFusion](source=QualityOfFusion; record=max,vector,histogram);
 }

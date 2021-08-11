@@ -1,11 +1,12 @@
 /*
  * MasterApp.cc
  *
- *  Created on: Aug 8, 2021
+ *  Created on: Aug 6, 2021
  *      Author: rahul
+ *  Modified from inet/applications/udpapp/UdpBasicBurst.cc
  */
-# include "MasterApp.h"
-# include "SlaveApp.h"
+#include "../Apps/MasterApp.h"
+#include "../Apps/SlaveApp.h"
 # include <cmath>
 # include <random>
 # include <cstdlib>
@@ -18,7 +19,6 @@
 # include <sstream>
 
 # define POPSIZE 64
-# define NBITS 8
 # define PMUTATION 0.01
 # define QOFTHRESHOLD 7.0
 # define NUMBEST 10
@@ -29,7 +29,7 @@ inet::simsignal_t inet::MasterApp::spSignal = registerSignal("SendingProbability
 inet::simsignal_t inet::MasterApp::efSignal = registerSignal("Efficiency");
 inet::simsignal_t inet::MasterApp::qofSignal = registerSignal("QualityOfFusion");
 
-int inet::MasterApp::seed = 123456789;
+int inet::MasterApp::seed = 123456789; // static initialization outside class
 
 void inet::MasterApp::initialize(int stage)
 {
@@ -74,10 +74,10 @@ void inet::MasterApp::initialize(int stage)
 
         timerNext = new cMessage("UDPBasicBurstTimer");
 
+        // Added to original initialize from this line:
         last_efficiency = 0.3;
         current_received = 0;
-        initialize_pop();
-        //seed = 123456789;
+        initialize_pop(); // Initialize GA classifiers population
         numConsults = 0;
         SendProb = 100;
         numHostsPar = &par("NumHosts");
@@ -87,17 +87,16 @@ void inet::MasterApp::initialize(int stage)
         numExp = 0;
         back_to_L = 0;
         n = 0;
-        //listener[numHosts];
-        std::stringstream temp;
-        std::string temp2;
-        std::string slName = "IEEE_802154_Net.slave[";
-        std::string slName2 = "]";
+
+        // Initialize the listener for transmitting the control signal:
         for (int i=0;i<numHosts;i++){
             char buf[30];
-            //sprintf(buf,"IEEE_802154_Net.slave[%d]",i);
-            sprintf(buf,"IEEE_802154_Net.slave[%d]",i);
-            //cModule *mod = getParentModule();
-            //cModule *moremod = mod->getParentModule();
+            /* !!! NOTE !!!
+             * Use IEEE_802154_Net below for static GMLA simulation and
+             * IEEE_802154_Mobile_Net in next line for mobile GMLA simulation
+             */
+            sprintf(buf,"IEEE_802154_Net.slave[%d]",i); //Static case
+            //sprintf(buf,"IEEE_802154_Mobile_Net.slave[%d]",i); // Mobile case
             cModule *downmod = getModuleByPath(buf);
             cModule *pmod = downmod->getSubmodule("app",0);
             listener[i] = check_and_cast<SlaveApp*>(pmod);
@@ -109,15 +108,13 @@ void inet::MasterApp::processSend()
 {
     if (stopTime < SIMTIME_ZERO || simTime() < stopTime) {
         // send and reschedule next sending
-        //if (isSource) // if the node is a sink, don't generate messages
-            //generateBurst();
         controlSP();
     }
 }
 
 //Genetic ML Algorithm:
 
-int inet::MasterApp::selectSP = 0;
+int inet::MasterApp::selectSP = 0; // Static initialization
 
 void inet::MasterApp::controlSP(){
 
@@ -128,6 +125,7 @@ void inet::MasterApp::controlSP(){
     double delta_ef;
     struct classifier *chosen[4];
 
+    // Calculate Efficiency:
     rcv_count = numReceived-current_received;
     current_received = numReceived;
     current_SP = SendProb/100;
@@ -135,21 +133,23 @@ void inet::MasterApp::controlSP(){
         efficiency = 0;
     }
     else
-        efficiency = rcv_count/(current_SP*65*4);
+        efficiency = rcv_count/(current_SP*numHosts*4);
     emit(efSignal,efficiency);
 
+    // Calculate Quality of Fusion:
     QoF = rcv_count/4;
     emit(qofSignal,QoF);
 
-    char Phase; // Selecting Expert or Learning Phase
+    // Selecting Expert or Learning Phase:
+    char Phase;
     if (back_to_L == 1){
         Phase = 'L';
-        //SendProb++;
     }
     if (numE>15 || numBest==NUMBEST){
             Phase = 'E';
         }
-    char Segment; // Different outcomes at beginning of simulation
+    // Different outcomes at beginning of simulation
+    char Segment;
     if (numConsults == 0)
         Segment = '0';
     else if (numConsults == 1)
@@ -157,6 +157,7 @@ void inet::MasterApp::controlSP(){
     else
         Segment = 'A';
 
+    //*************** START GA PORTION OF CONTROL ******************
     switch(Segment){
         case '0':{ // Do at simulation time 0s (startTime)
             SendProb = 50;
@@ -176,7 +177,7 @@ void inet::MasterApp::controlSP(){
             bank += 0.1*curr_classifier->budget;
             curr_classifier->budget = 0.9*curr_classifier->budget;
             //get SP value based on the chosen classifier:
-            //SendProb = SendProb*getSPVal(curr_classifier->action);
+            SendProb = SendProb*getSPVal(curr_classifier->action);
             if (SendProb>100)
                 SendProb = 100;
             last_classifier = curr_classifier;
@@ -257,9 +258,10 @@ void inet::MasterApp::controlSP(){
                         SendProb = 100;
                     last_classifier = curr_classifier;
                     last_efficiency = efficiency;
-                    numE++;
-                    // Do Evolution Here:
-                    if ((numConsults)%4==0){
+                    numE++;// Keep track of number of learning cycles
+
+        //********* Do Evolution (mating and replacement of 2 old classifiers with 2 new):**********
+                    if ((numConsults)%4==0){ // Do every 4 classifier system consults
                         int adapted1;
                         int adapted2;
                         int worst1;
@@ -303,54 +305,7 @@ void inet::MasterApp::controlSP(){
                         chosen[3]->action = from_evolve.c2;
                         chosen[2]->budget = 100;
                         chosen[3]->budget = 100;
-
-/*
-                        //First, Parent selection, given the consulted condition:
-                        int adapted1;
-                        int adapted2;
-                        int worst3;
-                        int worst2;
-                        int temp2;
-                        int temp3;
-                        if (numMax == 0){ // all 4 classifiers have same budget; random selection
-                            temp = random_choice(0,3,seed);
-                            for (i=0;i<4;i++){
-                                if (i != temp){
-                                    adapted2 = chosen[i]->action;
-                                    temp2 = i;
-                                    break;
-                                }
-                            }
-                            for (i=0;i<4;i++){
-                                if (i!=temp && i != temp2){
-                                    worst1 = chosen[temp2]->action;
-                                    temp3 = i;
-                                    break;
-                                }
-                            }
-                            for (i=0;i<4;i++){
-                                if (i!=temp && i != temp2 && i != temp3)
-                                    worst2 = chosen[temp2]->action;
-                            }
-                            adapted1 = chosen[temp]->action;
-                        }
-                        else if (numMax == 1){ // 1 classifier has highest budget
-                            adapted1 = best[0]->action;
-                        }
-                        else if (numMax == 2){ // 2 classifiers have max budget; random selection
-                            temp = random_choice(0,1,seed);
-                            curr_classifier = best[temp];
-                        }
-                        else{ // 3 classifiers have same max budget; random selection
-                            temp = random_choice(0,2,seed);
-                            curr_classifier = best[temp];
-                        }
-                        //Select best 2 parents
-                        //Get children value from Evolve
-                        //Replace the other two actions with children
-
-*/
-                    }
+                    } // End of evolution
                     break;
 
                 }
@@ -362,13 +317,14 @@ void inet::MasterApp::controlSP(){
                     numSent++;
                     int flag = 0;
                     if (numExp != 0){
+                        // If QoF threshold is not met, reduce score by 1
                         if (QoF<QOFTHRESHOLD){
                             BestSPList[selectSP].score += -1;
                         }
                         else{
                             BestSPList[selectSP].score += 1;
                         }
-
+                        // If no entry with score above 0 exists, go back to Learning
                         int temp = numBest;
                         for (i=0;i<numBest;i++){
                             if (BestSPList[i].score==0){
@@ -384,6 +340,7 @@ void inet::MasterApp::controlSP(){
                         }
 
                     }
+                    // Select the first above-zero score entry in best SP list
                     for (i=0;i<numBest;i++){
                         if (BestSPList[i].score>0){
                             SendProb = BestSPList[i].SPValue;
@@ -393,117 +350,26 @@ void inet::MasterApp::controlSP(){
                             break;
                         }
                     }
+                    last_efficiency = efficiency; // In case another learning cycle happens after expert phase
+                } // End of Expert Phase Case of Phase Switch
+            }  // End of Phase Switch
+        } // End of default Case of Segment Switch
+    } // End of Segment Switch
 
-                }
-            }
-        }
-    }
+    //***************** END GA PORTION OF CONTROL ******************
 
-
-/*
-    if (numConsults == 0){
-        SendProb = 100;
-    }
-    else if (numConsults == 1){
-        best_efficiency = efficiency;
-        if (QoF>=QOFTHRESHOLD){
-            BestSPList[numBest-1].SPValue = SendProb;
-            BestSPList[numBest-1].score = 1;
-            numBest++;
-        }
-        curr_classifier = &population[0];
-        //Pay tax to bank:
-        bank += 0.1*curr_classifier->budget;
-        curr_classifier->budget = 0.9*curr_classifier->budget;
-        //get SP value based on the chosen classifier:
-        SendProb = SendProb*getSPVal(curr_classifier->action);
-        if (SendProb>100)
-            SendProb = 100;
-        last_classifier = curr_classifier;
-        last_efficiency = efficiency;
-    }
-    else{
-        delta_ef = (last_efficiency/efficiency - 1)*100;
-        if (delta_ef>0){
-            //Reward last classifier if it had better performance
-            last_classifier->budget += bank;
-            bank = 0;
-            if (QoF>=QOFTHRESHOLD){
-                BestSPList[numBest-1].SPValue = SendProb;
-                BestSPList[numBest-1].score = 1;
-                numBest++;
-            }
-        }
-        consultedVal = consult(delta_ef);
-        for (i=0;i<4;i++)
-            chosen[i] = &population[consultedVal+i];
-        //With condition, choose 1 of 4 classifiers based on budget or random
-        int n = 3;
-        struct classifier *best[3];
-        best[0] = chosen[0];
-        best[1] = chosen[0];
-        best[2] = chosen[0];
-        int numMax = 0;
-        while(--n>0 && chosen[n]->budget==chosen[0]->budget);// check if all budgets are equal
-        if (n!=0){ //if not equal then get max and check if more than 1 has max value (out of the 4)
-            for (i=1;i<4;i++){
-                if (chosen[i]->budget > best[0]->budget){
-                    best[0] = chosen[i];
-                    numMax++;
-                }
-            }
-            for (i=1;i<4;i++){
-                if (chosen[i]->budget == best[0]->budget && best[0] != chosen[i]){
-                    best[1] = chosen[i];
-                    numMax++;
-                }
-                if (chosen[i]->budget == best[0]->budget && best[0] != chosen[i] && best[1] != chosen[i]){
-                    best[2] = chosen[i];
-                    numMax++;
-                }
-            }
-        }
-
-        int temp;
-        if (numMax == 0){ // all 4 classifiers have same budget; random selection
-            temp = random_choice(0,3,seed);
-            curr_classifier = chosen[temp];
-        }
-        else if (numMax == 1){ // 1 classifier has highest budget
-            curr_classifier = best[0];
-        }
-        else if (numMax == 2){ // 2 classifiers have max budget; random selection
-            temp = random_choice(0,1,seed);
-            curr_classifier = best[temp];
-        }
-        else{ // 3 classifiers have same max budget; random selection
-            temp = random_choice(0,2,seed);
-            curr_classifier = best[temp];
-        }
-        //Pay tax to bank:
-        bank += 0.1*curr_classifier->budget;
-        curr_classifier->budget = 0.9*curr_classifier->budget;
-        //get SP value based on the chosen classifier:
-        SendProb = SendProb*getSPVal(curr_classifier->action);
-        if (SendProb>100)
-            SendProb = 100;
-        last_classifier = curr_classifier;
-        last_efficiency = efficiency;
-    }
-*/
     // Send updates and symbolic message
-    //Packet *payload = createPacket();
-    //payload->setTimestamp();
-    //emit(packetSentSignal, payload);
-    SendProb+=20;
-    emit(spSignal,SendProb);
+    Packet *payload = createPacket();
+    payload->setTimestamp();
+    emit(packetSentSignal, payload);
+    socket.sendTo(payload, destAddr, destPort);
+    numSent++;
 
-    n++;
+    SendProb+=20; // To avoid getting stuck at value close to 0.
+    emit(spSignal,SendProb);
     for (i=0;i<numHosts;i++){
-        listener[i]->transferSP(SendProb);
+        listener[i]->transferSP(SendProb); // Sets value of SPVal at each slave nodes' app[0](SlaveApp class)
     }
-    //socket.sendTo(payload, destAddr, destPort);
-    //numSent++;
     numConsults++;
 
     // Reschedule next update:
@@ -517,7 +383,7 @@ void inet::MasterApp::controlSP(){
         timerNext->setKind(STOP);
         scheduleAt(stopTime, timerNext);
     }
-}
+} // End of Control SP
 
 inet::MasterApp::children inet::MasterApp::Evolve(int action1, int action2){
     //Does fixed point crossover for the given 4 bit integers
@@ -567,6 +433,7 @@ int inet::MasterApp::bernoulli_choice(double p,int &seed){
 }
 
 double inet::MasterApp::getSPVal(int action){
+    // Lookup table from paper
     double val;
     if (action==0){
         val = 1-0.12;
@@ -637,7 +504,7 @@ int inet::MasterApp::random_choice(int a, int b,int &seed){
 }
 
 int inet::MasterApp::consult(double delta_ef){
-
+    // Lookup table from paper
     int value = 0;
 
     if (delta_ef>0){
@@ -699,9 +566,9 @@ inet::MasterApp::classifier inet::MasterApp::population[POPSIZE];
 
 
 void inet::MasterApp::initialize_pop(){
-    //    get 16 conditions (numbers 0 to 15)
-    //    for each of the 16 numbers get 4 actions randomly from numbers 0 to 15
-    //    combine to get 64 classifiers
+    //  Process: get 16 conditions (numbers 0 to 15);
+    //  for each of the 16 numbers get 4 actions randomly from numbers 0 to 15
+    //  combine to get 64 classifiers.
     int i;
     int j;
     int count = 0;
@@ -725,8 +592,9 @@ void inet::MasterApp::initialize_pop(){
 
 }
 
-//Output new SP at start of every MA
-//Then at every multiple of 0.5s simtime,
+//Genetic Algorithm (just for reference)
+//Initialize population
+//Then at every multiple of 1s simtime,
 //    calculate efficiency since cycle start
 //    if efficiency is greater than best:
 //        set best eF = efficiency
@@ -738,7 +606,8 @@ void inet::MasterApp::initialize_pop(){
 //    select new classifier based on condition (highest budget or random if budget is same)
 //    get new SP value
 //    new classifier pays 10% of budget to bank
-//At every multiple of 0.15s simtime,
+//    Output new SP at start of every MA
+//At every multiple of 4s simtime,
 //    for the 4 classifiers belonging to current condition:
 //        select best 2 parents
 //        do crossover() for parents
@@ -747,7 +616,6 @@ void inet::MasterApp::initialize_pop(){
 //    new sp = from set of best SPs
 //else:
 //    new sp = current sp
-//
 
 
 

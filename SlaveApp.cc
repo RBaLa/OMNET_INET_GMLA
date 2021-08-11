@@ -1,12 +1,13 @@
 /*
  * SlaveApp.cc
  *
- *  Created on: Aug 8, 2021
+ *  Created on: Aug 6, 2021
  *      Author: rahul
+ *  Modified from inet/applications/udpapp/UdpBasicBurst.cc
  */
 
-#include "SlaveApp.h"
-#include "MasterApp.h"
+#include "../Apps/SlaveApp.h"
+
 #include "omnetpp.h"
 #include "inet/common/ModuleAccess.h"
 # include <cmath>
@@ -19,6 +20,7 @@
 # include <ctime>
 # include <cstring>
 # include <sstream>
+#include "../Apps/MasterApp.h"
 
 Define_Module(inet::SlaveApp);
 
@@ -67,7 +69,7 @@ void inet::SlaveApp::initialize(int stage)
         destPort = par("destPort");
 
         timerNext = new cMessage("UDPBasicBurstTimer");
-
+        // Added:
         SPval = 100.0;
     }
 }
@@ -130,20 +132,16 @@ void inet::SlaveApp::generateBurst()
 
     Packet *payload = createPacket();
     payload->setTimestamp();
-    //*************************************************************************************************
+    //**************************ADDED****************************
     // Watch for signal Sp (Sending Probability) from master node
     // and control transmission of message below.
-    //*************************************************************************************************
     temp = bernoulli_choice(SPval/100,sseed);
     if (temp==1){
         emit(packetSentSignal, payload);
         socket.sendTo(payload, destAddr, destPort);
         numSent++;
     }
-    //emit(packetSentSignal, payload);
-    //socket.sendTo(payload, destAddr, destPort);
-    //numSent++;
-
+    //***********************END OF ADDED*************************
     // Next timer
     if (activeBurst && nextPkt >= nextSleep)
         nextPkt = nextBurst;

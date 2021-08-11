@@ -14,7 +14,7 @@
 // 
 
 
-package SlaveApp;
+package Apps;
 
 import inet.applications.udpapp.UdpBasicBurst;
 import inet.applications.contract.IApp;
